@@ -56,7 +56,34 @@ static int end = 0;
 Agraph_t *graph;
 GVC_t *gvc;
 
-int x_src = 0;
+char *get_broken_string(const char *str)
+{
+	char *f_str = NULL;
+	size_t len = 0, i = 0;
+	int dist = 0;
+
+	len = strlen(str);
+	f_str = malloc(len);
+	if(!f_str)
+	{
+		printf("malloc() failed\n");
+		return NULL;
+	}
+	for(i = 0; i < len; i++)
+	{
+		if((str[i] == '.') && (dist >= 10) && ((len - i) > 10))
+		{
+			f_str[i] = '\n';
+			dist = 0;
+		}
+		else
+		{
+			f_str[i] = str[i];
+			dist++;
+		}
+	}
+	return f_str;
+}
 
 char *get_element_type_name(enum element_t type)
 {
@@ -110,7 +137,7 @@ void add_element(Agnode_t *node, enum element_t type, const char *name, int inde
 		printf("malloc() failed\n");
 		return;
 	}
-	pa_element->name = strdup(name);
+	pa_element->name = get_broken_string(name);
 	pa_element->type = type;
 	pa_element->index = index;
 	pa_element->client = client;
@@ -150,20 +177,19 @@ void sink_cb(pa_context *ctx, const pa_sink_info *info, int eol, void *data)
 		return;
 	}
 	printf("   SINK %80s[%d], eol=%d\n", info->name, info->index, eol);
-	Agnode_t *s = agnode(graph, strdup(info->name), 1);
+	Agnode_t *s = agnode(graph, get_broken_string(info->name), 1);
 	agsafeset(s, "color", "green", "green");
 	add_element(s, SINK, info->name, info->index, info->owner_module, -1, -1, -1, info->mute);
 }
 
 void source_cb(pa_context *ctx, const pa_source_info *info, int eol, void *data)
 {
-	int t = 1;
 	if(eol)
 	{
 		return;
 	}
 	printf("   SRC  %80s[%d], eol=%d\n", info->name, info->index, eol);
-	Agnode_t *s = agnode(graph, strdup(info->name), 1);
+	Agnode_t *s = agnode(graph, get_broken_string(info->name), 1);
 	agsafeset(s, "color", "red", "red");
 	//agsafeset(s, "shape", "cds", "cds");
 	add_element(s, SOURCE, info->name, info->index, info->owner_module, -1, -1, -1, info->mute);
@@ -183,7 +209,7 @@ struct pa_element_t *create_node(void *i)
 		src = get_node_by_id(info->owner_module, MODULE);
 		if(src->node == NULL)
 		{
-			src->node = agnode(graph, strdup(src->name), 1);
+			src->node = agnode(graph, get_broken_string(src->name), 1);
 		}
 
 	}
@@ -376,7 +402,8 @@ int main(int argc, char **argv)
 	agattr(graph, AGNODE, "rankdir", "LR");
 	agattr(graph, AGNODE, "fixedsize", "shape");
 	agattr(graph, AGNODE, "fontsize", "10.");
-	agattr(graph, AGNODE, "width", "4.0");
+	agattr(graph, AGNODE, "width", "3.0");
+	agattr(graph, AGNODE, "height", "0.7");
 
 	w_data.loop = pa_mainloop_new();
 	if(w_data.loop == NULL)
