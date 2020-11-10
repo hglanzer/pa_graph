@@ -24,6 +24,7 @@ enum states_t {
 
 struct thread_data_t{
 	pa_context *ctx;
+	pa_mainloop *loop;
 };
 
 enum element_t {
@@ -348,6 +349,8 @@ void *worker_thread(void *data)
 	//gvLayout(gvc, graph, "neato");
 	gvLayout(gvc, graph, "dot");
 	gvRenderFilename(gvc, graph, "png", "/tmp/test.png");
+	
+	pa_mainloop_quit(w_data->loop, 0);
 	return NULL;
 }
 
@@ -362,7 +365,6 @@ int main(int argc, char **argv)
 	pthread_t worker;
 	struct thread_data_t w_data;
 
-	pa_mainloop *loop;
 	pa_mainloop_api *api;
 	pa_context *ctx;
 	int ret = 0;
@@ -376,15 +378,13 @@ int main(int argc, char **argv)
 	agattr(graph, AGNODE, "fontsize", "10.");
 	agattr(graph, AGNODE, "width", "4.0");
 
-	//e = agedge(graph, n, m, "input", 1);
-
-	loop = pa_mainloop_new();
-	if(loop == NULL)
+	w_data.loop = pa_mainloop_new();
+	if(w_data.loop == NULL)
 	{
 		printf("pa_mainloop_new() failed\n");
 		return -1;
 	}
-	api = pa_mainloop_get_api(loop);
+	api = pa_mainloop_get_api(w_data.loop);
 	if(api == NULL)
 	{
 		printf("pa_get api() failed\n");
@@ -407,9 +407,9 @@ int main(int argc, char **argv)
 	w_data.ctx = ctx;
 	
 	pthread_create(&worker, NULL, worker_thread, &w_data);
-	pa_mainloop_run(loop, &ret);
+	pa_mainloop_run(w_data.loop, &ret);
 
-pthread_join(worker, NULL);
+	pthread_join(worker, NULL);
 
 
 	return 0;
