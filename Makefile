@@ -1,15 +1,16 @@
-OUT = pa_graph
+TARGET = pa_graph
 
 all:	pa_graph.c clean
-	gcc -Wall pa_graph.c -D_REENTRANT -I/usr/include/glib-2.0 \
-	-I/usr/lib/x86_64-linux-gnu/glib-2.0/include -lpulse-mainloop-glib -lpulse -lglib-2.0 `pkg-config --cflags --libs glib-2.0` \
+	gcc -Wall pa_graph.c \
 	-lpthread \
-	`pkg-config --cflags --libs  libgvc` \
+	`pkg-config --cflags --libs libpulse` \
+	`pkg-config --cflags --libs glib-2.0` \
+	`pkg-config --cflags --libs libgvc` \
 	-ggdb \
-	-o ${OUT}
+	-o ${TARGET}
 
 clean:
-	rm -f *.o ${OUT}
+	rm -f *.o ${TARGET}
 
 run:	all
-	./${OUT}
+	./${TARGET}
