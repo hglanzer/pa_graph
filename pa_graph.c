@@ -63,7 +63,7 @@ char *get_broken_string(const char *str)
 	int dist = 0;
 
 	len = strlen(str);
-	f_str = malloc(len);
+	f_str = strdup(str);
 	if(!f_str)
 	{
 		printf("malloc() failed\n");
@@ -77,10 +77,7 @@ char *get_broken_string(const char *str)
 			dist = 0;
 		}
 		else
-		{
-			f_str[i] = str[i];
 			dist++;
-		}
 	}
 	return f_str;
 }
@@ -118,7 +115,6 @@ struct pa_element_t *get_node_by_id(int id, enum element_t type)
 	for(int i = 0; i < g_slist_length(elements); i++)
 	{
 		element = (struct pa_element_t *)g_slist_nth(elements, i)->data;
-		printf("   SEARCH SOURCE %d <--> %d\n", id, element->source_id);
 		if((element->index == id) && (element->type == type))
 		{
 			printf("   found source id: %s of type %s\n", element->name, get_element_type_name(type));
@@ -319,6 +315,7 @@ void *worker_thread(void *data)
 			
 			case STATE_FINISHED:
 			{
+				printf("--- STATE FINISHED ---\n\n");
 			}
 			break;
 		}
@@ -326,53 +323,8 @@ void *worker_thread(void *data)
 	}
 
 	printf("FOUND %d elements\n", g_slist_length(elements));
-	for(int i = 0; i < g_slist_length(elements); i++)
-	{
-		struct pa_element_t *element = NULL;
-		element = (struct pa_element_t *)g_slist_nth(elements, i)->data;
-		if(!element)
-		{
-			printf("cannot get %dth element\n\n", i);
-			return 0;
-		}
-		printf("%d -> %15s: %80s\n", element->type, get_element_type_name(element->type), element->name);
-		switch(element->type)
-		{
-			case SOURCE:
-			{
-			}
-			break;
 
-			case SINK:
-			{
-			}
-			break;
-
-			case SOURCE_OUTPUT:
-			{
-			}
-			break;
-
-			case SINK_INPUT:
-			{
-			}
-			break;
-
-			case MODULE:
-			{
-			}
-			break;
-
-			case CLIENT:
-			{
-			}
-			break;
-		}
-	}
-
-	printf("--> LOOP DONE. exit\n\n");
 	agwrite(graph, stdout);
-	//gvLayout(gvc, graph, "neato");
 	gvLayout(gvc, graph, "dot");
 	gvRenderFilename(gvc, graph, "png", "/tmp/test.png");
 	
