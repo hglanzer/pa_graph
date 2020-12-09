@@ -25,6 +25,7 @@ enum states_t {
 struct thread_data_t{
 	pa_context *ctx;
 	pa_mainloop *loop;
+	int cb_done;
 };
 
 enum element_t {
@@ -42,44 +43,31 @@ struct pa_element_t
 	char *name;
 	int index;
 	int owner_id;
-	int client;
+	int client_id;
 	int source_id;
 	int sink_id;
 	int mute;
+	int monitor_source;
 	Agnode_t *node;
 };
 
 GSList *elements = NULL;
 
-static int end = 0;
-
 Agraph_t *graph;
 GVC_t *gvc;
 
-char *get_broken_string(const char *str)
+struct pa_element_t *get_element_by_type(enum element_t type)
 {
-	char *f_str = NULL;
-	size_t len = 0, i = 0;
-	int dist = 0;
-
-	len = strlen(str);
-	f_str = strdup(str);
-	if(!f_str)
+	struct pa_element_t *element;
+	for(int i = 0; i < g_slist_length(elements); i++)
 	{
-		printf("malloc() failed\n");
-		return NULL;
-	}
-	for(i = 0; i < len; i++)
-	{
-		if((str[i] == '.') && (dist >= 10) && ((len - i) > 10))
+		element = (struct pa_element_t *)g_slist_nth(elements, i)->data;
+		if(element->index == type)
 		{
-			f_str[i] = '\n';
-			dist = 0;
+			return element;
 		}
-		else
-			dist++;
 	}
-	return f_str;
+	return NULL;
 }
 
 char *get_element_type_name(enum element_t type)
@@ -109,7 +97,7 @@ char *get_element_type_name(enum element_t type)
 	}
 }
 
-struct pa_element_t *get_node_by_id(int id, enum element_t type)
+struct pa_element_t *get_element_by_type_and_id(int id, enum element_t type)
 {
 	struct pa_element_t *element;
 	for(int i = 0; i < g_slist_length(elements); i++)
@@ -117,14 +105,168 @@ struct pa_element_t *get_node_by_id(int id, enum element_t type)
 		element = (struct pa_element_t *)g_slist_nth(elements, i)->data;
 		if((element->index == id) && (element->type == type))
 		{
-			printf("   found source id: %s of type %s\n", element->name, get_element_type_name(type));
+			//printf("   found source id: %s of type %s\n", element->name, get_element_type_name(type));
 			return element;
 		}
 	}
 	return NULL;
 }
 
-void add_element(Agnode_t *node, enum element_t type, const char *name, int index, int owner_id, int client, int source_id, int sink_id, int mute)
+void link_monitors()
+{
+	struct pa_element_t *element = NULL, *monitor = NULL;
+	for(int i = 0; i < g_slist_length(elements); i++)
+	{
+		element = (struct pa_element_t *)g_slist_nth(elements, i)->data;
+		if(element->type == SINK)
+		{
+			monitor = get_element_by_type_and_id(element->monitor_source, SOURCE);
+			if(monitor)
+			{
+				printf("Sink %s monitor: %s[%d]\n", element->name, monitor->name, element->monitor_source);
+				Agedge_t *e = agedge(graph, element->node, monitor->node, "TEST", 1);
+			}
+			else
+				printf("*** ERROR ***: no monitor for sink %s found", element->name);
+		}
+	}
+}
+
+void link_source_outputs()
+{
+	struct pa_element_t *element = NULL, *src = NULL, *client = NULL, *module = NULL;
+	for(int i = 0; i < g_slist_length(elements); i++)
+	{
+		element = (struct pa_element_t *)g_slist_nth(elements, i)->data;
+		if(element->type == SOURCE_OUTPUT)
+		{
+			src = get_element_by_type_and_id(element->source_id, SOURCE);
+			client = get_element_by_type_and_id(element->client_id, CLIENT);
+			if(!src)
+			{
+				printf("NO SRC for source output...?? ****\n");
+				continue;
+			}
+			else if(src && client)
+			{
+				if(!src->node)
+				{
+					continue;
+					printf("SINK %d has no node\n", element->sink_id);
+				}
+				if(!src->node)
+				{
+					printf("CLIENT %d has no node\n", element->client_id);
+					continue;
+				}
+				agedge(graph, src->node, client->node, "TEST", 1);
+			}
+			else
+			// loopback modules: no client (N/A): create link from loopback module
+			{
+				module = get_element_by_type_and_id(element->owner_id, MODULE);
+				if(!src->node)
+				{
+					continue;
+					printf("SRC %d has no node\n", element->sink_id);
+				}
+				if(!module->node)
+				{
+					printf("MODULE %d has no node\n", element->owner_id);
+					module->node = agnode(graph, module->name, 1);
+					agsafeset(module->node, "color", "black", "black");
+					agsafeset(module->node, "shape", "ellipse", "ellipse");
+					agsafeset(module->node, "height", "0.3", "0.3");
+					agsafeset(module->node, "width", "1.2", "1.2");
+				}
+				printf("*** MODULE %d found for sink input %s\n", element->owner_id, element->name);
+				agedge(graph, src->node, module->node, "module", 1);
+			}
+		}
+	}
+}
+
+void link_sink_inputs()
+{
+	struct pa_element_t *element = NULL, *sink = NULL, *client = NULL, *module = NULL;
+	for(int i = 0; i < g_slist_length(elements); i++)
+	{
+		element = (struct pa_element_t *)g_slist_nth(elements, i)->data;
+		if(element->type == SINK_INPUT)
+		{
+			sink = get_element_by_type_and_id(element->sink_id, SINK);
+			client = get_element_by_type_and_id(element->client_id, CLIENT);
+			if(!sink)
+			{
+				printf("NO SINK for sinkinput...?? ****\n");
+				continue;
+			}
+			else if(sink && client)
+			{
+				if(!sink->node)
+				{
+					continue;
+					printf("SINK %d has no node\n", element->sink_id);
+				}
+				if(!client->node)
+				{
+					printf("CLIENT %d has no node\n", element->client_id);
+					continue;
+				}
+				agedge(graph, client->node, sink->node, "TEST", 1);
+			}
+			else
+			// loopback modules: no client (N/A): create link from loopback module
+			{
+				module = get_element_by_type_and_id(element->owner_id, MODULE);
+				if(!sink->node)
+				{
+					continue;
+					printf("SINK %d has no node\n", element->sink_id);
+				}
+				if(!module->node)
+				{
+					printf("MODULE %d has no node\n", element->owner_id);
+					module->node = agnode(graph, module->name, 1);
+					agsafeset(module->node, "color", "black", "black");
+					agsafeset(module->node, "shape", "ellipse", "ellipse");
+					agsafeset(module->node, "height", "0.3", "0.3");
+					agsafeset(module->node, "width", "1.2", "1.2");
+				}
+				printf("*** MODULE %d found for sink input %s\n", element->owner_id, element->name);
+				agedge(graph, module->node, sink->node, "module", 1);
+			}
+		}
+	}
+}
+
+char *get_broken_string(const char *str)
+{
+	char *f_str = NULL;
+	size_t len = 0, i = 0;
+	int dist = 0;
+
+	len = strlen(str);
+	f_str = strdup(str);
+	if(!f_str)
+	{
+		printf("malloc() failed\n");
+		return NULL;
+	}
+	for(i = 0; i < len; i++)
+	{
+		if((str[i] == '.') && (dist >= 10) && ((len - i) > 10))
+		{
+			f_str[i] = '\n';
+			dist = 0;
+		}
+		else
+			dist++;
+	}
+	return f_str;
+}
+
+void add_element(Agnode_t *node, enum element_t type, const char *name, int index, int owner_id, int client_id, int source_id, int sink_id, int mute, int monitor_source)
 {
 	struct pa_element_t *pa_element = (void *)malloc(sizeof(struct pa_element_t));
 
@@ -133,62 +275,76 @@ void add_element(Agnode_t *node, enum element_t type, const char *name, int inde
 		printf("malloc() failed\n");
 		return;
 	}
-	pa_element->name = get_broken_string(name);
+	pa_element->name = strdup(name);
 	pa_element->type = type;
 	pa_element->index = index;
-	pa_element->client = client;
+	pa_element->client_id = client_id;
 	pa_element->source_id = source_id;
 	pa_element->sink_id = sink_id;
 	pa_element->owner_id = owner_id;
 	pa_element->mute = mute;
 	pa_element->node = node;
+	pa_element->monitor_source = monitor_source;
 
 	elements = g_slist_append(elements, pa_element);
 }
 
 void client_cb(pa_context *ctx, const pa_client_info *info, int eol, void *data)
 {
+	struct thread_data_t *w_data = (struct thread_data_t *)data;
+	char name[64];
 	if(eol)
 	{
+		w_data->cb_done = 1;
 		return;
 	}
-	printf("   CLIENT    %80s[%d], eol=%d\n", info->name, info->index, eol);
-	add_element(NULL, CLIENT, info->name, info->index, info->owner_module, -1, -1, -1, -1);
+	snprintf(name, sizeof(name), "Client %d", info->index);
+	printf("%20s: %80s[%2d]\n", "CLIENT", name, info->index);
+
+	Agnode_t *s = agnode(graph, get_broken_string(info->name), 1);
+	agsafeset(s, "color", "yellow", "yellow");
+	add_element(s, CLIENT, name, info->index, info->owner_module, -1, -1, -1, -1, -1);
 }
 
 void module_cb(pa_context *ctx, const pa_module_info *info, int eol, void *data)
 {
+	struct thread_data_t *w_data = (struct thread_data_t *)data;
 	if(eol)
 	{
+		w_data->cb_done = 1;
 		return;
 	}
-	printf("   MODULE  %80s[%d], eol=%d\n", info->name, info->index, eol);
-	add_element(NULL, MODULE, info->name, info->index, -1, -1, -1, -1, -1);
+	printf("%20s: %80s[%2d]\n", "MODULE", info->name, info->index);
+	add_element(NULL, MODULE, info->name, info->index, -1, -1, -1, -1, -1, -1);
 }
 
 void sink_cb(pa_context *ctx, const pa_sink_info *info, int eol, void *data)
 {
+	struct thread_data_t *w_data = (struct thread_data_t *)data;
 	if(eol)
 	{
+		w_data->cb_done = 1;
 		return;
 	}
-	printf("   SINK %80s[%d], eol=%d\n", info->name, info->index, eol);
+	printf("%20s: %80s[%2d]\n", "SINK", info->name, info->index);
 	Agnode_t *s = agnode(graph, get_broken_string(info->name), 1);
 	agsafeset(s, "color", "green", "green");
-	add_element(s, SINK, info->name, info->index, info->owner_module, -1, -1, -1, info->mute);
+	add_element(s, SINK, info->name, info->index, info->owner_module, -1, -1, -1, info->mute, info->monitor_source);
 }
 
 void source_cb(pa_context *ctx, const pa_source_info *info, int eol, void *data)
 {
+	struct thread_data_t *w_data = (struct thread_data_t *)data;
 	if(eol)
 	{
+		w_data->cb_done = 1;
 		return;
 	}
-	printf("   SRC  %80s[%d], eol=%d\n", info->name, info->index, eol);
+	printf("%20s: %80s[%2d]\n", "SOURCE", info->name, info->index);
 	Agnode_t *s = agnode(graph, get_broken_string(info->name), 1);
 	agsafeset(s, "color", "red", "red");
 	//agsafeset(s, "shape", "cds", "cds");
-	add_element(s, SOURCE, info->name, info->index, info->owner_module, -1, -1, -1, info->mute);
+	add_element(s, SOURCE, info->name, info->index, info->owner_module, -1, -1, -1, info->mute, -1);
 }
 
 struct pa_element_t *create_node(void *i)
@@ -197,12 +353,12 @@ struct pa_element_t *create_node(void *i)
 	pa_sink_input_info *info = (pa_sink_input_info *)i;
 	if(info->client != -1)
 	{
-		src = get_node_by_id(info->client, CLIENT);
+		src = get_element_by_type_and_id(info->client, CLIENT);
 		src->node = agnode(graph, strdup(src->name), 1);
 	}
 	else
 	{
-		src = get_node_by_id(info->owner_module, MODULE);
+		src = get_element_by_type_and_id(info->owner_module, MODULE);
 		if(src->node == NULL)
 		{
 			src->node = agnode(graph, get_broken_string(src->name), 1);
@@ -215,42 +371,51 @@ struct pa_element_t *create_node(void *i)
 
 void sink_input_cb(pa_context *ctx, const pa_sink_input_info *info, int eol, void *data)
 {
-	struct pa_element_t *sink = NULL, *src = NULL;
+	struct thread_data_t *w_data = (struct thread_data_t *)data;
+	char name[64];
 	if(eol)
 	{
-		printf(" ------------ END GATHERING ------------ \n\n");
-		end = 1;
+		w_data->cb_done = 1;
 		return;
 	}
-	printf("   SINK INPUT %80s[%d] --> sink %d\n", info->name, info->index, info->sink);
+	snprintf(name, sizeof(name), "Sink Input %d", info->index);
+	printf("%20s: %80s[%2d]\n", "SINK INPUT", name, info->index);
+	add_element(NULL, SINK_INPUT, name, info->index, info->owner_module, info->client, -1, info->sink, info->mute, -1);
+	/*
 	src = create_node((void *)info);	
-	sink = get_node_by_id(info->sink, SINK);
+	sink = get_element_by_id(info->sink, SINK);
 
 	agedge(graph, src->node, sink->node, "TEST", 1);
 
-	add_element(NULL, SINK_INPUT, info->name, info->index, info->owner_module, info->client, -1, info->sink, info->mute);
+	*/
 }
 
 void source_output_cb(pa_context *ctx, const pa_source_output_info *info, int eol, void *data)
 {
-	struct pa_element_t *sink = NULL, *src = NULL;
+	struct thread_data_t *w_data = (struct thread_data_t *)data;
+	char name[64];
 	if(eol)
 	{
+		w_data->cb_done = 1;
 		return;
 	}
-	printf("   SRC OUT  %80s[%d], SOURCE = %d, client = %d\n", info->name, info->index, info->source, info->client);
+	snprintf(name, sizeof(name), "Source Output %d", info->index);
+	printf("%20s: %80s[%2d]\n", "SOURCE OUTPUT", name, info->index);
+	add_element(NULL, SOURCE_OUTPUT, name, info->index, info->owner_module, info->client, info->source, -1, info->mute, -1);
+	/*
 	sink = create_node((void *)info);	
-	src = get_node_by_id(info->source, SOURCE);
+	src = get_element_by_id(info->source, SOURCE);
 
 	agedge(graph, src->node, sink->node, "TEST", 1);
 
-	add_element(NULL, SOURCE_OUTPUT, info->name, info->index, info->owner_module, info->client, info->source, -1, info->mute);
+	*/
 }
 
 void *worker_thread(void *data)
 {
-	enum states_t states = STATE_INIT;
+	enum states_t state = STATE_INIT;
 	struct thread_data_t *w_data = NULL;
+	int done = 0;
 
 	if(!data)
 	{
@@ -260,69 +425,73 @@ void *worker_thread(void *data)
 
 	w_data = (struct thread_data_t *)data;
 
-	while(!end)
+	while(!done)
 	{
-		switch(states)
+		while(1)
+		{
+			sleep(1);
+			if(w_data->cb_done)
+			{
+				w_data->cb_done = 0;
+				state++;
+				break;
+			}
+			else
+				printf(".");
+		}
+
+		switch(state)
 		{
 			case STATE_INIT:
 				if(pa_context_get_state(w_data->ctx) == PA_CONTEXT_READY)
-					states = STATE_GET_SOURCES;
+					state = STATE_GET_SOURCES;
 		
 				printf("WORKER waiting, pa state = %d\n", pa_context_get_state(w_data->ctx));
 			break;
 
 			case STATE_GET_SOURCES:
-			printf("STATE: %s", "request SOURCES\n");
 			pa_context_get_source_info_list(w_data->ctx, source_cb, w_data);
-
-			states = STATE_GET_SINKS; 
 			break;
 
 			case STATE_GET_SINKS:
-			printf("STATE: %s", "request SINKS\n");
 			pa_context_get_sink_info_list(w_data->ctx, sink_cb, w_data);
 			
-			states = STATE_GET_MODULES; 
 			break;
 			
 			case STATE_GET_MODULES:
-			printf("STATE: %s", "request MODULES INPUTS\n");
 			pa_context_get_module_info_list(w_data->ctx, module_cb, w_data);
 			
-			states = STATE_GET_CLIENTS;
 			break;
 			
 			case STATE_GET_CLIENTS:
-			printf("STATE: %s", "request CLIENTS INPUTS\n");
 			pa_context_get_client_info_list(w_data->ctx, client_cb, w_data);
 			
-			states = STATE_GET_SOURCE_OUTPUTS;
 			break;
 			
 			case STATE_GET_SOURCE_OUTPUTS:
-			printf("STATE: %s", "request SOURC OUTPUTS\n");
 			pa_context_get_source_output_info_list(w_data->ctx, source_output_cb, w_data);
 			
-			states = STATE_GET_SINK_INPUTS; 
 			break;
 			
 			case STATE_GET_SINK_INPUTS:
-			printf("STATE: %s", "request SINK INPUTS\n");
 			pa_context_get_sink_input_info_list(w_data->ctx, sink_input_cb, w_data);
 			
-			states = STATE_FINISHED;
 			break;
 			
 			case STATE_FINISHED:
 			{
 				printf("--- STATE FINISHED ---\n\n");
+				done = 1;
 			}
 			break;
 		}
-		sleep(0.2);
 	}
 
 	printf("FOUND %d elements\n", g_slist_length(elements));
+
+	link_monitors();
+	link_sink_inputs();
+	link_source_outputs();
 
 	agwrite(graph, stdout);
 	gvLayout(gvc, graph, "dot");
@@ -356,6 +525,9 @@ int main(int argc, char **argv)
 	agattr(graph, AGNODE, "fontsize", "10.");
 	agattr(graph, AGNODE, "width", "3.0");
 	agattr(graph, AGNODE, "height", "0.7");
+
+	// this just rotates the graph / not what we want...
+	//agattr(graph, AGRAPH, "orientation", "landscape");
 
 	w_data.loop = pa_mainloop_new();
 	if(w_data.loop == NULL)
